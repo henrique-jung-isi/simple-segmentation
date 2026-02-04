@@ -1,0 +1,47 @@
+function(remove_empty_dir dir)
+  if(IS_SYMLINK "${dir}" OR EXISTS "${dir}")
+    file(GLOB files "${dir}/*")
+    list(LENGTH files fileCount)
+    if(fileCount EQUAL 0)
+      message(STATUS "Uninstalling ${dir}")
+      execute_process(
+        COMMAND "/usr/bin/cmake" -E remove_directory "${dir}"
+        OUTPUT_VARIABLE rm_out
+        RESULT_VARIABLE rm_retval
+      )
+      if(NOT "${rm_retval}" STREQUAL 0)
+        message(FATAL_ERROR "Problem when removing ${dir}")
+      else()
+        file(REAL_PATH "${dir}/.." parent)
+        remove_empty_dir("${parent}")
+      endif()
+    endif()
+  else()
+    message(STATUS "${dir} does not exist")
+  endif()
+endfunction()
+
+if(NOT EXISTS "@CMAKE_BINARY_DIR@/install_manifest.txt")
+  message(FATAL_ERROR "Cannot find install manifest: @CMAKE_BINARY_DIR@/install_manifest.txt")
+endif()
+
+file(READ "@CMAKE_BINARY_DIR@/install_manifest.txt" files)
+string(REGEX REPLACE "\n" ";" files "${files}")
+foreach(file ${files})
+  set(current "$ENV{DESTDIR}${file}")
+  message(STATUS "Uninstalling ${current}")
+  if(IS_SYMLINK "${current}" OR EXISTS "${current}")
+    execute_process(
+      COMMAND "@CMAKE_COMMAND@" -E remove "${current}"
+      OUTPUT_VARIABLE out
+      RESULT_VARIABLE returnValue
+    )
+    if(NOT "${returnValue}" STREQUAL 0)
+      message(FATAL_ERROR "Problem when removing ${current}")
+    endif()
+    get_filename_component(directory "${current}" DIRECTORY)
+    remove_empty_dir(${directory})
+  else()
+    message(STATUS "File ${current} does not exist.")
+  endif()
+endforeach()
