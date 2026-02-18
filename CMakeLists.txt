@@ -1,19 +1,16 @@
 cmake_minimum_required(VERSION 3.8)
 
-project(PROJECT_NAME_HERE LANGUAGES CXX)
+project(simple_segmentation LANGUAGES CXX)
 
+find_package(isisim_inference REQUIRED)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # ================== Sources ==================
 # choose one:
 add_executable(
     ${PROJECT_NAME}
-    # add sources here
-)
-
-add_library(
-    ${PROJECT_NAME}
-    SHARED
-    # add sources here
+    "src/SimpleSegmentation.cpp"
+    "main.cpp"
 )
 
 # ================== Headers ==================
@@ -28,7 +25,7 @@ target_include_directories(
 target_link_libraries(
     ${PROJECT_NAME}
     PUBLIC
-    # add dependencies here
+    isisim_inference
 )
 
 # ================== Strip outputs if in release ==================
@@ -102,6 +99,3 @@ if(NOT TARGET uninstall)
         COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/uninstall.cmake
     )
 endif()
-
-# ================== Build examples ==================
-add_subdirectory(examples)
