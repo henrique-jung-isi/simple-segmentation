@@ -1,10 +1,23 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.11)
 
 project(simple_segmentation LANGUAGES CXX)
 
-find_package(isisim_inference REQUIRED)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+find_package(isisim_inference REQUIRED)
+find_package(arg_parser QUIET)
+
+if(NOT arg_parser_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(
+        arg_parser
+        GIT_REPOSITORY https://github.com/henrique-jung-isi/arg-parser.git
+        GIT_TAG v1.0.0
+    )
+    FetchContent_MakeAvailable(arg_parser)
+endif()
+
 # ================== Sources ==================
 # choose one:
 add_executable(
@@ -25,6 +38,7 @@ target_include_directories(
 target_link_libraries(
     ${PROJECT_NAME}
     PUBLIC
+    arg_parser
     isisim_inference
 )
 
