@@ -7,56 +7,122 @@
 using namespace std;
 
 SimpleSegmentation::SimpleSegmentation(int argc, char *argv[])
-    : _args{parseArgs(argc, argv)} {}
+    : _parser{{"simple-segmentation",
+               "The default segmentation operation is to resize the input. "
+               "Called without arguments is the same as: segmentation -e "
+               "model.engine <input"}},
+      _engineOption{
+        {"-e", "--engine"},
+        "Path for the engine to use. Default: ./model.engine",
+        "engineFile",
+        {"./mode.engine"},
+      },
+      _roiOption{
+        {"--roi"},
+        "Change segmentation operation to use the entire image scaled down and "
+        "one "
+        "region of interest at full input resolution.",
+      },
+      _overlayOption{
+        {"-o", "--overlay"},
+        "Overlay the resulting mask on top of the input image.",
+      },
+      _showOption{
+        {"--show"},
+        "Show original and segmented image.",
+      },
+      _saveCropsOption{
+        {"--saveCrops"},
+        "Save input images used.",
+      },
+      _saveMasksOption{
+        {"--saveMasks"},
+        "Save output masks.",
+      },
+      _simpleSaveOption{
+        {"--simpleSave"},
+        "Save only mask and image used side by side.",
+      },
+      _iouOption{{"--iou"}, "Set iou for NMS.", "value", {"0.7"}},
+      _confOption{{"--conf"}, "Set minimum confidence.", "value", {"0.25"}},
+      _useOption{{"--use"},
+                 "Set indexes, separated by spaces between quotation "
+                 "marks, to use for segmentation crop operation.",
+                 "values",
+                 {"17 18 22 23 24 25 26 28 29 30 31 32 33 34"}},
+      _extensionOption{{"--extension"},
+                       "The extension to use for saving outputs.",
+                       "value",
+                       {"jpg"}} {
+  _parser.addHelpOption();
+  _parser.addVersionOption();
+  _parser.addPositionalArgument("INPUT",
+                                "Path for the image to segment. Or path to a "
+                                "directory containing images.");
+  _parser.addOption(_engineOption);
+  _parser.addOption(_roiOption);
+  _parser.addOption(_overlayOption);
+  _parser.addOption(_showOption);
+  _parser.addOption(_saveCropsOption);
+  _parser.addOption(_saveMasksOption);
+  _parser.addOption(_simpleSaveOption);
+  _parser.addOption(_iouOption);
+  _parser.addOption(_confOption);
+  _parser.addOption(_useOption);
+  _parser.addOption(_extensionOption);
+  _parser.parse(argc, argv);
+}
 
 int SimpleSegmentation::run() {
-  if (!_args.error.empty()) {
-    cerr << "Unkown option: " << _args.error[0] << endl;
-    showHelpMessage();
-    return 1;
-  }
-  if (_args.path.empty()) {
-    cerr << "Input path not given." << endl;
-    showHelpMessage();
-    return 1;
-  }
-  if (_args.showHelp) {
-    showHelpMessage();
-    return 0;
-  }
+  const auto path = filesystem::absolute(_parser.positionalValues().front());
 
-  const auto images = getImages(_args.path);
-
-  cout << "Using engine: " << _args.enginePath << endl;
-  if (!filesystem::exists(_args.enginePath)) {
-    cerr << "Engine file: " << _args.enginePath << " file not found." << endl;
+  const auto engine = filesystem::absolute(_parser.value(_engineOption));
+  if (!filesystem::exists(engine)) {
+    cerr << "Engine file: " << engine.string() << " not found." << endl;
     return 1;
   }
-  cout << "Using path: " << _args.path << endl;
+  cout << "Using engine: " << engine.string() << endl;
+  cout << "Using path: " << path << endl;
+  const auto images = getImages(path);
   if (images.empty()) {
-    cerr << "No image found at " << _args.path << endl;
+    cerr << "No image found at " << path << endl;
     return 1;
   }
+  const auto useRoi = _parser.isSet(_roiOption);
+  const auto useIndex = _parser.isSet(_useOption);
+  const auto resize = !useRoi && !useIndex;
   cout << "Performing segmentation "
-       << (_args.useRoi   ? "using RoI."
-           : _args.resize ? "resizing input."
-                          : "slicing input.")
+       << (resize   ? "resizing input."
+           : useRoi ? "using RoI."
+                    : "slicing input.")
        << endl;
-
-  auto index = 1;
-  auto segmenter =
-      Inference::Segmentation(_args.enginePath, true, !_args.simpleSave, 20);
-  const auto simplePath =
-      "runs/" + string(filesystem::path(_args.enginePath).stem());
-  if (_args.simpleSave) {
-    filesystem::create_directories(string(simplePath));
+  const auto simpleSave = _parser.isSet(_simpleSaveOption);
+  auto segmenter = Inference::Segmentation(engine, true, !simpleSave, 20);
+  const auto simplePath = "runs/" + engine.stem().string();
+  if (simpleSave) {
+    filesystem::create_directories(simplePath);
   }
+  const auto show = _parser.isSet(_showOption);
+  Inference::Options options{
+    .conf{_parser.value<float>(_confOption)},
+    .iou{_parser.value<float>(_iouOption)},
+    .overlay{_parser.isSet(_overlayOption)},
+    .save{true},
+    .saveCrops{_parser.isSet(_saveCropsOption)},
+    .saveOutput{false},
+    .saveMasks{_parser.isSet(_saveMasksOption)},
+    .saveTimings{false},
+  };
 
-  for (const auto &imagePath : images) {
+  auto extension = _parser.value(_extensionOption);
+  if (!extension.starts_with('.')) {
+    extension = "." + extension;
+  }
+  for (auto index = 1; const auto &imagePath : images) {
     cout << "Performing inference " << index << " of " << images.size() << endl;
     cout << "File: " << filesystem::absolute(imagePath) << endl;
     cv::Mat image = cv::imread(imagePath);
-    if (_args.show) {
+    if (show) {
       cv::namedWindow("Original Image", cv::WINDOW_NORMAL);
       cv::imshow("Original Image", image);
       cv::resizeWindow("Original Image", {800, 600});
@@ -65,25 +131,26 @@ int SimpleSegmentation::run() {
 
     cv::Mat segmented_image;
     Inference::Result<Inference::Segment> result;
-    if (_args.useRoi) {
-      result = segmenter(image, segmented_image, cv::Rect(), _args.options);
-    } else if (_args.resize) {
-      result = segmenter(image, segmented_image, _args.options);
+    if (resize) {
+      result = segmenter(image, segmented_image, options);
+    } else if (useRoi) {
+      result = segmenter(image, segmented_image, cv::Rect(), options);
     } else {
-      result = segmenter(image, segmented_image, _args.indexes, _args.options);
+      // TODO: parse string array
+      // result = segmenter(image, segmented_image, _args.indexes, options);
     }
-    if (_args.simpleSave) {
+    if (simpleSave) {
       const auto baseName = string(simplePath) + "/" +
                             string(filesystem::absolute(imagePath).stem()) +
                             "-mask";
-      // if (!options.overlay) {
-      //   cv::Mat resized;
-      //   cv::resize(image, resized, result.batches[0].resizedSize);
-      //   cv::imwrite(baseName + extension, resized);
-      // }
-      cv::imwrite(baseName + _args.extension, segmented_image);
+      if (!options.overlay) {
+        cv::Mat resized;
+        cv::resize(image, resized, result.batches[0].resizedSize);
+        cv::imwrite(baseName + extension, resized);
+      }
+      cv::imwrite(baseName + extension, segmented_image);
     }
-    if (_args.show) {
+    if (show) {
       cv::namedWindow("Segmented Image", cv::WINDOW_NORMAL);
       cv::imshow("Segmented Image", segmented_image);
       cv::resizeWindow("Segmented Image", {800, 600});
@@ -113,107 +180,10 @@ SimpleSegmentation::getImages(const std::filesystem::path &path) {
   if (std::filesystem::is_directory(path)) {
     std::filesystem::directory_iterator it(path);
     for (const auto &content : it) {
-      if (isImage(content))
-        images.push_back(content.path());
+      if (isImage(content)) images.push_back(content.path());
     }
   } else if (isImage(std::filesystem::directory_entry(path))) {
     images.push_back(path);
   }
   return images;
-}
-
-void SimpleSegmentation::showHelpMessage() {
-  cout
-      << "Usage:\n"
-         "  segmentation [OPTIONS] [INPUT]\n\n"
-
-         "  The default segmentation operation is to resize the input.\n"
-         "  Called without arguments is the same as:\n"
-         "  segmentation -e model.engine <input>\n\n"
-
-         "Input:\n"
-         " Path for the image to segment. Or path to a directory containing "
-         "images.\n\n"
-
-         "Options:\n"
-         "  -h, --help         Show help.\n"
-         "  -c, --crop         Change segmentation operation to crop.\n"
-         "  --roi              Change segmentation operation to use the\n"
-         "                     entire image scaled down and one region of\n"
-         "                     interest at full input resolution.\n\n"
-
-         "  -e <file>          Path for the engine to use.\n"
-         "                     Default: ./model.engine\n\n"
-
-         "  -o                 Overlay the resulting mask on top of the input\n"
-         "                     image.\n\n"
-
-         "  --show             Show original and segmented image.\n"
-         "  --saveCrops        Save input images used.\n"
-         "  --saveMasks        Save output masks.\n"
-         "  -s                 Save everything.\n"
-         "  --simpleSave       Save only mask and image used side by side.\n"
-         "  --iou <value>      Set iou for NMS.\n"
-         "                     Default: 0.7\n\n"
-
-         "  --conf <value>     Set minimum confidence.\n"
-         "                     Default: 0.25\n\n"
-
-         "  --use <values>     Set indexes, separated by spaces between\n"
-         "                     quotation marks, to use for segmentation crop\n"
-         "                     operation.\n"
-         "                     Default: \"17 18 22 23 24 25 26 28 29 30 31 32\n"
-         "                               33 34\"\n";
-}
-
-Args SimpleSegmentation::parseArgs(int argc, char *argv[]) {
-  Args args;
-  for (int i = 0; i < argc; i++) {
-    const auto arg = string(argv[i]);
-    if (arg == "-h" || arg == "--help") {
-      return Args{.showHelp{true}};
-    } else if (arg == "-e" && i + 1 < argc) {
-      args.enginePath = filesystem::absolute(argv[i + 1]);
-    } else if (arg == "-o") {
-      args.options.overlay = true;
-    } else if (arg == "--saveCrops") {
-      args.options.saveCrops = true;
-    } else if (arg == "--saveOutput") {
-      args.options.saveOutput = true;
-    } else if (arg == "--saveMasks") {
-      args.options.saveMasks = true;
-    } else if (arg == "-s") {
-      args.options.saveCrops = true;
-      args.options.saveOutput = true;
-      args.options.saveMasks = true;
-    } else if (arg == "--iou" && i + 1 < argc) {
-      args.options.iou = stof(argv[i + 1]);
-    } else if (arg == "--conf" && i + 1 < argc) {
-      args.options.conf = stof(argv[i + 1]);
-    } else if (arg == "--use" && i + 1 < argc) {
-      args.indexes.clear();
-      stringstream ss(argv[i + 1]);
-      string index;
-      while (getline(ss, index, ' ')) {
-        args.indexes.push_back(stoi(index));
-      }
-    } else if (arg == "-c" || arg == "--crop") {
-      args.resize = false;
-      args.useRoi = false;
-    } else if (arg == "--roi") {
-      args.useRoi = true;
-      args.resize = false;
-    } else if (arg == "--show") {
-      args.show = true;
-    } else if (arg == "--simpleSave") {
-      args.simpleSave = true;
-    } else if (arg == "--png") {
-      args.extension = ".png";
-    } else if (arg.starts_with('-')) {
-      args.error.push_back(arg);
-    } else {
-      args.path = arg;
-    }
-  }
-  return args;
 }

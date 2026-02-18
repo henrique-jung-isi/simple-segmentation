@@ -13,7 +13,7 @@ if(NOT arg_parser_FOUND)
     FetchContent_Declare(
         arg_parser
         GIT_REPOSITORY https://github.com/henrique-jung-isi/arg-parser.git
-        GIT_TAG v1.0.0
+        GIT_TAG v1.0.3
     )
     FetchContent_MakeAvailable(arg_parser)
 endif()
@@ -33,6 +33,7 @@ target_include_directories(
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
 )
+
 
 # ================== Dependecies ==================
 target_link_libraries(
