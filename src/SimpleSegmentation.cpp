@@ -185,5 +185,6 @@ SimpleSegmentation::getImages(const std::filesystem::path &path) {
   } else if (isImage(std::filesystem::directory_entry(path))) {
     images.push_back(path);
   }
+  std::sort(images.begin(), images.end());
   return images;
 }
